@@ -11,7 +11,7 @@
 #property strict
 
 #include <Trade\Trade.mqh>
-
+#include "time.mqh";
 
 
 // Enum for Stop Loss Modes
@@ -184,7 +184,7 @@ void OnTick() {
    CheckAndCloseEODTrade();
    
    // Only open a trade if no trade is currently open
-   if(!tradeOpen) {
+   if(!tradeOpen && is_about_935am_est()) {
       double entry = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
       double stopLoss = CalculateStopLoss(entry);
       double takeProfit = CalculateTakeProfit(entry, stopLoss);
