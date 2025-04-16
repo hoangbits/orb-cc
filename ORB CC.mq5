@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//|                                                       ORB CC.mq5 |
+//|                                                       ORB QQ.mq5 |
 //|                                                         Hoang Le |
 //|                                             https://www.mql5.com |
 //+------------------------------------------------------------------+
@@ -27,6 +27,7 @@ enum ENUM_TP_MODE {
 };
 
 // Input Parameters
+input int            InpXMinuteAfterOpen = 5;             // Minutes after Opening
 input ENUM_SL_MODE   InpSLMode = SL_FIXED_TIME;     // Stop Loss Mode
 input ENUM_TP_MODE   InpTPMode = TP_END_OF_DAY;     // Take Profit Mode
 
@@ -179,36 +180,73 @@ void OnDeinit(const int reason) {
    // Cleanup if needed
 }
 
+bool IsNewBar() {
+   static datetime lastBar = 0;
+   datetime currentBar = iTime(_Symbol, PERIOD_CURRENT, 0);
+   if(lastBar != currentBar) {
+      lastBar = currentBar;
+      return true;
+   }
+   return false;
+}
+
 void OnTick() {
+   if(!IsNewBar()) return;
    // Check and close EOD trade if applicable
    CheckAndCloseEODTrade();
    
    // Only open a trade if no trade is currently open
-   if(!tradeOpen && is_about_935am_est()) {
+   // !tradeOpen && 
+   if(is_about_x_minute_after930_est(InpXMinuteAfterOpen)) {
+     // compare close of the last candle in the opening range (OHLC[or_candles-1, 3]) to the open of the first candle
+      Print("not entry, finding entry condition");
+      
+
       double entry = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
       double stopLoss = CalculateStopLoss(entry);
       double takeProfit = CalculateTakeProfit(entry, stopLoss);
       
       // Add your trade execution logic
       // This is a placeholder - replace with your specific trade entry conditions
-      if(SomeEntryCondition()) {
+      if(is_price_different()) {
          // Calculate position size based on risk
          double positionSize = CalculatePositionSize(entry, stopLoss);
          
          // Using CTrade to send order
-         if(trade.Buy(positionSize, _Symbol, entry, stopLoss, takeProfit, "HCVT Trade")) {
+         if(false && trade.Buy(positionSize, _Symbol, entry, stopLoss, takeProfit, "HCVT Trade")) {
             tradeOpen = true;
             tradeTicket = trade.ResultOrder();
             Print("Trade opened successfully. Ticket: ", tradeTicket, " Position Size: ", positionSize);
          } else {
-            Print("Trade opening failed. Error: ", trade.ResultRetcode());
+           // Print("Trade opening failed. Error: ", trade.ResultRetcode());
          }
       }
    }
 }
 
-// Placeholder function - replace with your actual entry condition
-bool SomeEntryCondition() {
+// only entry if 
+bool is_price_different() {
    // Add your specific entry logic here
-   return true;  // Always return true for this example
+   double open_price = get_est_930am_open_price(_Symbol, InpXMinuteAfterOpen);
+   // Print("open_price: ", open_price);
+   // note: caching price: https://www.notion.so/hoanglg/MQL5-caching-OHLC-price-1d7391b340a8802db71ef3c8092ebbec
+   double closing_price = get_close_price_at_x_minutes_after_930(_Symbol, InpXMinuteAfterOpen);   
+   // Print("closing_price: ", closing_price, " after ", InpXMinuteAfterOpen, " minutes from 9:30" );
+   
+   
+    // Define minimum difference to consider prices different
+   double min_diff = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE); // Use tick size
+   
+   // Check if prices are different by comparing their absolute difference
+   bool prices_are_different = (MathAbs(open_price - closing_price) > min_diff);
+   
+   // Log the result
+   if(prices_are_different) {
+      Print("Prices are different: Open=", open_price, ", Close=", closing_price, 
+            ", Diff=", MathAbs(open_price - closing_price));
+   } else {
+      Print("Prices are the same or within minimum difference threshold");
+   }
+   Print("prices_are_different: ", prices_are_different);
+   return prices_are_different;
 }
