@@ -75,13 +75,15 @@ double CalculatePositionSize(double entry, double stopLoss) {
    return NormalizeDouble(positionSize, 2);
 }
 
-double CalculateStopLoss(double entry) {
+double CalculateStopLoss(double entry, string bias) {
+   Print("CalculateStopLoss");
    switch(InpSLMode) {
       case SL_FIXED_TIME:
          return CalculateFixedTimeSL(entry);
       
       case SL_ATR_PERCENT:
-         return CalculateAtrPercentSL(entry);
+         Print("CalculateStopLoss SL_ATR_PERCENT");
+         return CalculateAtrPercentSL(entry, bias);
       
       default:
          return 0;
@@ -90,21 +92,22 @@ double CalculateStopLoss(double entry) {
 
 double CalculateFixedTimeSL(double entry) {
    // Stop Loss at 9:30
-   datetime currentTime = TimeCurrent();
-   datetime todayStart = StringToTime(TimeToString(currentTime, TIME_DATE) + " 09:30");
+   //datetime currentTime = TimeCurrent();
+   //datetime todayStart = StringToTime(TimeToString(currentTime, TIME_DATE) + " 09:30");
    
    // If current time is past 9:30, return 0 (no SL)
-   if(currentTime >= todayStart) return 0;
+   //if(currentTime >= todayStart) return 0;
    
    // Assuming long position - adjust for short
    return entry;
 }
 
-double CalculateAtrPercentSL(double entry) {
+double CalculateAtrPercentSL(double entry, string bias) {
    double atr[];
    ArraySetAsSeries(atr, true);
    
-   int atrHandle = iATR(_Symbol, PERIOD_CURRENT, InpAtrPeriod);
+   int atrHandle = iATR(_Symbol, PERIOD_D1, InpAtrPeriod);
+   Print("CalculateAtrPercentSL, atrHandle: ", atrHandle);
    if(atrHandle == INVALID_HANDLE) {
       Print("Failed to create ATR indicator");
       return entry;
@@ -113,15 +116,24 @@ double CalculateAtrPercentSL(double entry) {
    int atrCopied = CopyBuffer(atrHandle, 0, 0, 1, atr);
    IndicatorRelease(atrHandle);
    
+   Print("atrCopied: ", atrCopied, " with value atr[0]: ", atr[0]);
+   
    if(atrCopied <= 0) return entry;
    
    double slDistance = atr[0] * (InpAtrPercent / 100.0);
    
    // Assuming long position - adjust for short
-   return entry - slDistance;
+   double sl = 0;
+   if (bias == "BUY"){
+     sl = entry - slDistance;
+   }else {
+     sl = entry + slDistance;
+   }
+   Print("SL", sl);  
+   return sl;
 }
 
-double CalculateTakeProfit(double entry, double stopLoss) {
+double CalculateTakeProfit(double entry, double stopLoss, string bias) {
    switch(InpTPMode) {
       case TP_END_OF_DAY:
          return CalculateEODTP(entry, stopLoss);
@@ -153,12 +165,10 @@ double CalculateRiskRewardTP(double entry, double stopLoss) {
 
 void CheckAndCloseEODTrade() {
    // Check if trade is open and EOD TP mode is selected
-   if(tradeOpen && InpTPMode == TP_END_OF_DAY) {
-      datetime currentTime = TimeCurrent();
-      datetime endOfDay = StringToTime(TimeToString(currentTime, TIME_DATE) + " 23:59:59");
+   if(tradeOpen && InpTPMode == TP_END_OF_DAY) {      
       
       // Close trade at end of day
-      if(currentTime >= endOfDay) {
+      if(is_about_1559_est()) {
          if(trade.PositionClose(tradeTicket)) {
             tradeOpen = false;
             tradeTicket = 0;
@@ -198,34 +208,60 @@ void OnTick() {
    // Only open a trade if no trade is currently open
    // !tradeOpen && 
    if(is_about_x_minute_after930_est(InpXMinuteAfterOpen)) {
+      
      // compare close of the last candle in the opening range (OHLC[or_candles-1, 3]) to the open of the first candle
       Print("not entry, finding entry condition");
-      
-
-      double entry = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-      double stopLoss = CalculateStopLoss(entry);
-      double takeProfit = CalculateTakeProfit(entry, stopLoss);
+      bool prices_are_different = false;
+      string bias = "";
+      is_price_different(prices_are_different, bias);
+      //as retail, can only buy will high price -> ask price
+      double entry = SymbolInfoDouble(_Symbol, SYMBOL_ASK);      
+      // and sell with low price -> bid
+      if (bias == "SELL") {
+         entry = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+      }
+      double stopLoss = CalculateStopLoss(entry, bias);
+      double takeProfit = CalculateTakeProfit(entry, stopLoss, bias);
       
       // Add your trade execution logic
       // This is a placeholder - replace with your specific trade entry conditions
-      if(is_price_different()) {
+      Print("bias: ", bias);
+      Print("entry: ", entry);
+      Print("stopLoss: ", stopLoss);
+      Print("takeProfit: ", takeProfit);
+      if(bias == "BUY") {
          // Calculate position size based on risk
          double positionSize = CalculatePositionSize(entry, stopLoss);
          
          // Using CTrade to send order
-         if(false && trade.Buy(positionSize, _Symbol, entry, stopLoss, takeProfit, "HCVT Trade")) {
+         if(trade.Buy(positionSize, _Symbol, entry, stopLoss, takeProfit, "HCVT Trade")) {
             tradeOpen = true;
             tradeTicket = trade.ResultOrder();
             Print("Trade opened successfully. Ticket: ", tradeTicket, " Position Size: ", positionSize);
          } else {
-           // Print("Trade opening failed. Error: ", trade.ResultRetcode());
+            Print("Trade opening failed. Error: ", trade.ResultRetcode());
          }
       }
+      // sell
+      if(bias == "SELL") {
+         // Calculate position size based on risk
+         double positionSize = CalculatePositionSize(entry, stopLoss);
+         
+         // Using CTrade to send order
+         if(trade.Sell(positionSize, _Symbol, entry, stopLoss, takeProfit, "HCVT Trade")) {
+            tradeOpen = true;
+            tradeTicket = trade.ResultOrder();
+            Print("Trade opened successfully. Ticket: ", tradeTicket, " Position Size: ", positionSize);
+         } else {
+            Print("Trade opening failed. Error: ", trade.ResultRetcode());
+         }
+      }
+      
    }
 }
 
 // only entry if 
-bool is_price_different() {
+void is_price_different(bool &prices_are_different, string &bias) {
    // Add your specific entry logic here
    double open_price = get_est_930am_open_price(_Symbol, InpXMinuteAfterOpen);
    // Print("open_price: ", open_price);
@@ -238,7 +274,7 @@ bool is_price_different() {
    double min_diff = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE); // Use tick size
    
    // Check if prices are different by comparing their absolute difference
-   bool prices_are_different = (MathAbs(open_price - closing_price) > min_diff);
+   prices_are_different = (MathAbs(open_price - closing_price) > min_diff);
    
    // Log the result
    if(prices_are_different) {
@@ -247,6 +283,10 @@ bool is_price_different() {
    } else {
       Print("Prices are the same or within minimum difference threshold");
    }
-   Print("prices_are_different: ", prices_are_different);
-   return prices_are_different;
+   if (closing_price - open_price > 0) {
+      bias = "BUY";
+   }else{
+      bias = "SELL";
+   }
+   Print("prices_are_different: ", prices_are_different);   
 }
